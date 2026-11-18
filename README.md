@@ -1,14 +1,14 @@
 # PosDoF Supplementary Material
 
-This repository contains the implementation and dataset accompanying the anonymous PosDoF submission.
+This repository contains the implementation and dataset accompanying the PosDoF submission.
 
 ## Contents
 
 ```text
 supplementary/
 ├── code/
-│   ├── PosDoF/       # main PosDoF implementation
-│   └── Coverage/     # PosDoF + coverage-aware insertion
+│   ├── PosDoF/       # PosDoF implementation
+│   └── Coverage/     # PosDoF with coverage-aware insertion
 ├── examples/
 ├── scripts/
 ├── LICENSE
@@ -18,6 +18,8 @@ supplementary/
 The complete image dataset is distributed through the `dataset-v1` GitHub Release as `PosDoF_Dataset.zip`.
 
 ## Dataset
+
+The released dataset contains five real scenes and five synthetic scenes with fixed training and test splits.
 
 ```text
 PosDoF_Dataset/
@@ -35,7 +37,7 @@ PosDoF_Dataset/
     └── Gallery/{train,test}
 ```
 
-Real-scene splits:
+### Real scenes
 
 | Scene | Train | Test |
 |---|---:|---:|
@@ -47,63 +49,63 @@ Real-scene splits:
 
 Each synthetic scene contains 42 training images and 6 fixed test images.
 
-The fixed test images are excluded from MVS reconstruction, surface/depth estimation and Gaussian training. They are used only for evaluation.
+The fixed test images are excluded from MVS reconstruction, surface/depth estimation, and Gaussian training. They are reserved exclusively for evaluation.
 
 ## PosDoF implementation
 
-SparseSurf optimises a Gaussian centre as a free three-dimensional parameter. PosDoF associates Gaussian `i` with an MVS surface anchor `a_i` and unit surface normal `n_i`, restricting the admissible centre positions to
+SparseSurf optimises a Gaussian centre as a free three-dimensional parameter. PosDoF associates Gaussian \(i\) with an MVS surface anchor \(a_i\) and unit surface normal \(n_i\), restricting its admissible centre positions to the anchor-normal line
 
 ```text
 C_i = { a_i + d n_i | d in R }.
 ```
 
-The centre remains a 3D optimisable parameter. For centre gradient `g_i`, PosDoF uses the normal-direction projector
+The Gaussian centre remains a three-dimensional optimisable parameter. For centre gradient \(g_i\), PosDoF constructs the normal-direction projector
 
 ```text
 P_i = n_i n_i^T
 ```
 
-and retains
+and retains the normal component of the positional gradient:
 
 ```text
 g_i <- P_i g_i.
 ```
 
-After the optimiser step, the centre is projected back to its anchor-normal line:
+After the optimiser step, the centre is projected back onto its anchor-normal line:
 
 ```text
 x_i <- a_i + P_i (x_i - a_i).
 ```
 
-Only Gaussian position is constrained. Scale, rotation, opacity, spherical-harmonic coefficients, rasterisation and the SparseSurf loss terms are unchanged.
+The positional constraint acts on the Gaussian centre. Scale, rotation, opacity, spherical-harmonic coefficients, rasterisation, and the SparseSurf loss terms retain the underlying SparseSurf formulation.
 
-SparseSurf's original image-space densification criterion is retained. When cloning or splitting creates a child Gaussian, its birth position becomes its new anchor and it inherits the parent surface normal.
+SparseSurf's image-space densification criterion is retained. When densification creates a child Gaussian, its positional handling remains consistent with the surface-constrained representation.
 
 ## Coverage-aware implementation
 
-`code/Coverage/` contains the optional coverage-aware extension. It supplements the existing densification process by adding surface-supported Gaussians where the current representation has insufficient support.
+`code/Coverage/` contains the coverage-aware extension. It supplements the existing densification process by introducing surface-supported Gaussians in regions where the current representation provides insufficient coverage.
 
-For pixel `u`, the mean RGB reconstruction residual is
+For pixel \(u\), the mean RGB reconstruction residual is
 
 ```text
 E_rgb(u) = (1/3) sum_c |I_c(u) - I_hat_c(u)|.
 ```
 
-With accumulated rendered opacity `alpha(u)`, the coverage-deficit score is
+Using the accumulated rendered opacity `alpha(u)`, the coverage-deficit score is
 
 ```text
 S(u) = E_rgb(u) [1 - alpha(u)].
 ```
 
-Candidate pixels are selected with an adaptive IQR threshold:
+Candidate selection uses an adaptive interquartile-range threshold:
 
 ```text
 tau = Q3 + 1.5 (Q3 - Q1).
 ```
 
-Pixels satisfying `S(u) > tau` and having valid stereo depth can generate new Gaussians. Their positions are obtained by back-projecting the stereo depth. The reconstructed point becomes the new Gaussian anchor, after which the Gaussian follows the same PosDoF positional constraint.
+Pixels with sufficiently high coverage-deficit scores and valid stereo depth are considered as candidates for additional Gaussian support. Candidate geometry is obtained from the available stereo/depth information and transformed into the scene coordinate system before insertion.
 
-The coverage extension is separate from the main method: PosDoF changes how existing Gaussian centres move, while coverage-aware insertion changes where additional Gaussian support is introduced.
+The coverage-aware extension and PosDoF address different parts of optimisation. PosDoF constrains positional optimisation of Gaussian centres using local surface geometry, while coverage-aware insertion introduces additional Gaussian support in under-represented image regions.
 
 ## Environment
 
@@ -117,19 +119,27 @@ conda env create -f environment.yml
 conda activate sparsesurf_bw
 ```
 
-For the coverage variant, use the corresponding `code/Coverage` directory with the same software environment.
+The coverage-aware implementation is provided under:
 
-A FoundationStereo checkpoint is required by the training pipeline and is passed through `--foundation_stereo_ckpt`.
+```bash
+cd code/Coverage
+```
+
+and uses the corresponding environment and dependencies included in that directory.
+
+The training pipeline requires a FoundationStereo checkpoint. Its location is supplied using:
+
+```text
+--foundation_stereo_ckpt
+```
 
 ## Preparing the released images
 
-The release intentionally exposes the original train/test image split. The training code expects a SparseSurf-prepared scene rather than training directly from the two image folders.
+The dataset release provides the original fixed training and test image splits. The training code expects a SparseSurf-prepared scene containing the camera registration and geometry required by the SparseSurf pipeline.
 
-Before training, prepare the scene with the SparseSurf/COLMAP/MVS pipeline so that camera registration and the required stereo/MVS geometry are available.
+The released `test/` images must **not** be included in COLMAP/MVS reconstruction, surface/depth estimation, or Gaussian training. They are reserved for final evaluation.
 
-**Do not include the released `test/` images in MVS or training.**
-
-After preparation, define:
+After preparing a scene from the corresponding `train/` images, define:
 
 ```bash
 SCENE=/path/to/prepared_scene
@@ -137,25 +147,39 @@ MODEL=/path/to/output_model
 CKPT=/path/to/foundationstereo_checkpoint
 ```
 
+`SCENE` should point to the prepared SparseSurf scene, `MODEL` specifies the output directory, and `CKPT` points to the FoundationStereo checkpoint.
+
 ## Train PosDoF
+
+Enter the PosDoF implementation directory:
 
 ```bash
 cd code/PosDoF
 ```
 
-Set the number of training views. For example, RedRoom uses:
+Set the number of training views for the selected scene. For example:
 
 ```bash
 N=58
 ```
 
-Train for the 7,000-iteration schedule used in the experiments:
+Train using the 7,000-iteration configuration used in the experiments:
 
 ```bash
-python -u train.py     -s "$SCENE"     -m "$MODEL"     -r 1     --eval     --n_views "$N"     --iterations 7000     --test_iterations 7000     --save_iterations 7000     --total_virtual_num 240     --foundation_stereo_ckpt "$CKPT"
+python -u train.py \
+    -s "$SCENE" \
+    -m "$MODEL" \
+    -r 1 \
+    --eval \
+    --n_views "$N" \
+    --iterations 7000 \
+    --test_iterations 7000 \
+    --save_iterations 7000 \
+    --total_virtual_num 240 \
+    --foundation_stereo_ckpt "$CKPT"
 ```
 
-Use:
+Use the following training-view counts:
 
 | Scene | `N` |
 |---|---:|
@@ -170,7 +194,7 @@ Use:
 | Cafe | 42 |
 | Gallery | 42 |
 
-The final representation is saved under the model directory, including:
+The final Gaussian representation is saved under the model directory, including:
 
 ```text
 point_cloud/iteration_7000/point_cloud.ply
@@ -178,70 +202,106 @@ point_cloud/iteration_7000/point_cloud.ply
 
 ## Render
 
+Render the trained representation using:
+
 ```bash
-python -u render.py     -s "$SCENE"     -m "$MODEL"     -r 1     --eval     --n_views "$N"     --iteration 7000     --render_depth
+python -u render.py \
+    -s "$SCENE" \
+    -m "$MODEL" \
+    -r 1 \
+    --eval \
+    --n_views "$N" \
+    --iteration 7000 \
+    --render_depth
 ```
 
 ## Evaluate image quality
 
-After rendering:
+After rendering, run:
 
 ```bash
 python metrics.py -m "$MODEL"
 ```
 
-The evaluation pipeline reports PSNR, SSIM and LPIPS and also computes AVGE.
+The evaluation pipeline reports PSNR, SSIM, LPIPS, and AVGE.
 
 ## Train the coverage-aware variant
 
-Use the same prepared scene, camera split, training schedule and evaluation pipeline:
+The coverage-aware variant uses the same prepared scene, fixed camera split, training schedule, and evaluation protocol.
+
+Enter the Coverage implementation directory:
 
 ```bash
 cd code/Coverage
 ```
 
-Then:
+Set `SCENE`, `MODEL`, `CKPT`, and `N` as above, then train:
 
 ```bash
-python -u train.py     -s "$SCENE"     -m "$MODEL"     -r 1     --eval     --n_views "$N"     --iterations 7000     --test_iterations 7000     --save_iterations 7000     --total_virtual_num 240     --foundation_stereo_ckpt "$CKPT"
+python -u train.py \
+    -s "$SCENE" \
+    -m "$MODEL" \
+    -r 1 \
+    --eval \
+    --n_views "$N" \
+    --iterations 7000 \
+    --test_iterations 7000 \
+    --save_iterations 7000 \
+    --total_virtual_num 240 \
+    --foundation_stereo_ckpt "$CKPT"
 ```
 
-Render and evaluate using the same commands:
+Render the resulting model using:
 
 ```bash
-python -u render.py     -s "$SCENE"     -m "$MODEL"     -r 1     --eval     --n_views "$N"     --iteration 7000     --render_depth
+python -u render.py \
+    -s "$SCENE" \
+    -m "$MODEL" \
+    -r 1 \
+    --eval \
+    --n_views "$N" \
+    --iteration 7000 \
+    --render_depth
+```
 
+Then evaluate:
+
+```bash
 python metrics.py -m "$MODEL"
 ```
 
 ## Sparse-view RedRoom experiments
 
-The fixed three RedRoom test images remain unchanged while the training-view count is varied:
+The RedRoom sparse-view experiments use the following numbers of training views:
 
 ```text
 12, 24, 36, 58
 ```
 
-Set the corresponding value through `--n_views`. The held-out images must remain excluded from MVS and training at every density.
+The same three fixed RedRoom test images are retained for every training density. Set the required training-view count using `--n_views`.
+
+The held-out test images remain excluded from MVS reconstruction and training for every density.
 
 ## Experimental protocol
 
-For SparseSurf, PosDoF and PosDoF with coverage, comparisons use the same camera splits, training schedule, rendering configuration and evaluation pipeline. Models are trained for 7,000 iterations.
+SparseSurf, PosDoF, and the coverage-aware variant are compared using the same camera splits, training schedule, rendering configuration, and evaluation pipeline. Models are trained for 7,000 iterations.
 
-No post-training pruning or compression is applied when reporting Gaussian counts. PosDoF does not use a Gaussian-count loss, an additional pruning rule or a fixed population target.
+No post-training pruning or compression is applied when reporting Gaussian counts. PosDoF does not introduce a Gaussian-count loss, an additional pruning rule, or a fixed population target.
 
-## DTU note
+## DTU evaluation
 
-The public DTU evaluation uses the same 7,000-iteration PosDoF pipeline. The prepared DTU configuration contains three reconstruction views per scan and no independent held-out novel-view test images. DTU image metrics therefore represent reconstruction/input-view quality, not held-out novel-view quality.
+The DTU experiments use the 7,000-iteration PosDoF pipeline. The prepared DTU configuration contains three reconstruction views per scan and does not contain an independent held-out novel-view test set.
+
+Accordingly, DTU image-quality measurements correspond to reconstruction/input-view quality and should not be interpreted as held-out novel-view results.
 
 ## Dataset download
 
-Dataset release:
+The complete dataset is available from the `dataset-v1` release:
 
-https://github.com/3dresearch26/supplementary/releases/tag/dataset-v1
+https://github.com/3dresearch26/supplementary-material/releases/tag/dataset-v1
 
 Download `PosDoF_Dataset.zip` from the release assets.
 
 ## Anonymous review
 
-This repository is provided as anonymous supplementary material for double-blind peer review. Author and institutional identifying information is intentionally omitted.
+This repository is provided as anonymous supplementary material for double-blind peer review.
