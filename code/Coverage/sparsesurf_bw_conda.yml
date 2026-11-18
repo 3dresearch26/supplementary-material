@@ -1,0 +1,10 @@
+name: sparsesurf_bw
+channels:
+  - defaults
+dependencies:
+  - python=3.10
+  - cmake
+  - pip
+  - ninja
+  - gxx_linux-64=12
+  - gcc_linux-64=12
